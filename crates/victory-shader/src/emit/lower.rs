@@ -5213,6 +5213,10 @@ impl<'a> Lower<'a> {
                     "le" => pred::IULE,
                     "gt" => pred::IUGT,
                     "ge" => pred::IUGE,
+                    "f" | "t" => {
+                        self.lane(inst, Some(op == "t"));
+                        return Ok(());
+                    }
                     _ => return Err("a 64-bit compare"),
                 };
                 self.s.m.cmp(c, p, a, b)
