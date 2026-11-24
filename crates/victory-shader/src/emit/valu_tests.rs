@@ -743,3 +743,45 @@ fn v_cmp_class_f16_matches_rdna2() {
         );
     });
 }
+
+#[test]
+fn v_cmp_const_i64_and_u64_set_or_clear_every_lane() {
+    // The constant-false (`f`) and constant-true (`t`) 64-bit integer
+    // compares clear or set every lane's mask bit regardless of their
+    // operands, exactly as their 32-bit forms do. Encoded e64 so the lane
+    // mask lands in an explicit SGPR that v_cndmask then selects on:
+    //   v_cmp_<op>_<ty>_e64 s6, v[1:2], v[3:4]   (VOP3 opcodes 0xa0/0xa7/0xe0/0xe7)
+    //   v_cndmask_b32_e64   v0, 0, 1, s6         -> v0 = (s6 & 1) ? 1 : 0
+    let shader = |op: u16| {
+        build_valu_cs(&[
+            vop3(op, 6, vgpr(1), vgpr(3), 0)[0],
+            vop3(op, 6, vgpr(1), vgpr(3), 0)[1],
+            vop3(0x101, 0, 0x80, 0x81, sgpr(6))[0],
+            vop3(0x101, 0, 0x80, 0x81, sgpr(6))[1],
+        ])
+    };
+    let variants: &[(&str, u16, u32)] = &[
+        ("v_cmp_f_i64", 0x0a0, 0),
+        ("v_cmp_t_i64", 0x0a7, 1),
+        ("v_cmp_f_u64", 0x0e0, 0),
+        ("v_cmp_t_u64", 0x0e7, 1),
+    ];
+    // Operand pairs v[1:2], v[3:4] spanning zero, equal, signed-negative and
+    // max values: the result must not depend on any of them.
+    let inputs: &[[u32; 4]] = &[
+        [0x0000_0000, 0x0000_0000, 0x0000_0000, 0x0000_0000],
+        [0x0000_0001, 0x0000_0000, 0x0000_0001, 0x0000_0000],
+        [0x0000_0000, 0x8000_0000, 0x0000_0000, 0x0000_0000],
+        [0xFFFF_FFFF, 0xFFFF_FFFF, 0x0000_0007, 0x0000_0000],
+    ];
+    for &(name, op, want) in variants {
+        let shader = shader(op);
+        run_cases(&shader, inputs, |backend, _, inp, got| {
+            assert_eq!(
+                got, want,
+                "{backend}: {name}({:#010x}_{:08x}, {:#010x}_{:08x}) = {got}, want {want}",
+                inp[1], inp[0], inp[3], inp[2],
+            );
+        });
+    }
+}
